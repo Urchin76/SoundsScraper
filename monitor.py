@@ -129,57 +129,71 @@ def scrape_kroese():
         ("CD", "https://www.kroese-online.nl/aanbiedingen/")
     ]
     found_items = []
-    
+
     for cat_name, base_url in base_urls:
-        for page in range(1, 10):
+        for page in range(1, 15):
             url = f"{base_url}?page={page}" if page > 1 else base_url
             try:
                 res = requests.get(url, headers=HEADERS, timeout=12)
                 if res.status_code != 200:
                     break
-            except Exception as e:
-                print(f"   ❌ Kroese error op {url}: {e}")
+            except Exception:
                 break
 
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # Zoek naar specifieke elementen/links waarin artikelen op Kroese staan
-            # Kroese heeft vaak blokken of rijen met links naar detailpagina's
-            product_links = soup.find_all("a", href=True)
+            # Zoek naar alle productblokken
+            items = soup.find_all(["div", "li", "article"], class_=re.compile("product|item|album|grid|box", re.I))
+            if not items:
+                items = soup.find_all("div")
+
             page_found = 0
+            for item in items:
+                text = item.get_text()
+                if len(text) > 2500:  # Sla grote pagina-containers over
+                    continue
 
-            for link in product_links:
-                href = link['href']
-                # Check of het een relevante product-URL is
-                if any(p in href for p in ["/artikel/", "/item/", "/release/"]) or (base_url in href and href != base_url):
-                    parent = link.parent
-                    # Zoek tekst in de direct omliggende HTML van de link
-                    container_text = parent.get_text() if parent else link.get_text()
-                    
-                    price_match = re.search(r'€\s*(\d+[\.,]\d{2})', container_text)
-                    title_candidate = clean_title(link.get_text(strip=True))
+                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
+                if not price_match:
+                    continue
 
-                    if price_match and title_candidate and len(title_candidate) > 3:
-                        price = float(price_match.group(1).replace(",", "."))
-                        full_link = urljoin("https://www.kroese-online.nl", href)
-                        
+                # Zoek alle links in dit item, maar negeer winkelwagen/account-links
+                links = item.find_all("a", href=True)
+                product_link, title_text = None, ""
+
+                for link in links:
+                    href_str = link['href']
+                    # STRIKTE FILTERING: Geen winkelwagen, cart of account
+                    if any(x in href_str.lower() for x in ["winkelwagen", "cart", "basket", "account", "login", "#"]):
+                        continue
+
+                    candidate = clean_title(link.get_text(strip=True) or link.get('title', ''))
+                    if len(candidate) > len(title_text) and "korting" not in candidate.lower():
+                        title_text = candidate
+                        product_link = href_str
+
+                if price_match and product_link and title_text:
+                    price = float(price_match.group(1).replace(",", "."))
+                    full_link = urljoin("https://www.kroese-online.nl", product_link)
+
+                    # Zorg dat de URL geen algemene pagina is
+                    if full_link != base_url and "winkelwagen" not in full_link:
                         found_items.append({
                             "url": full_link,
-                            "title": title_candidate,
+                            "title": title_text,
                             "category": cat_name,
                             "price": price,
                             "source": "Kroese Online"
                         })
                         page_found += 1
 
-            # Stop pas als er na 2 pagina's echt niks meer gevonden wordt
             if page_found == 0 and page > 1:
                 break
 
     unique_items = list({v['url']: v for v in found_items}.values())
     print(f"   ✅ Kroese Online: {len(unique_items)} items gevonden.")
     return unique_items
-
+    
 def scrape_velvet():
     print("🔍 Scrapen van VelvetMusic.nl...")
     base_urls = [
@@ -233,64 +247,75 @@ def scrape_velvet():
 def scrape_platomania():
     print("🔍 Scrapen van Platomania.nl...")
     base_urls = [
-        ("LP", "https://www.platomania.nl/plato-50-aanbiedingen"),
-        ("LP", "https://www.platomania.nl/music-on-vinyl-sale")
+        ("LP", "https://www.platomania.nl/vinyl-aanbiedingen"),
+        ("CD", "https://www.platomania.nl/search/results?search_in=sale&format=cd")
     ]
     found_items = []
-    
+
     for cat_name, base_url in base_urls:
-        try:
-            res = requests.get(base_url, headers=HEADERS, timeout=12)
-            if res.status_code != 200:
-                print(f"   ⚠️ Platomania HTTP status {res.status_code} op {base_url}")
-                continue
-        except Exception as e:
-            print(f"   ❌ Platomania verbinding mislukt: {e}")
-            continue
+        # Loop door maximaal 30 pagina's om alle 400+ items op te halen
+        for page in range(1, 30):
+            url = f"{base_url}?page={page}" if page > 1 else base_url
+            try:
+                res = requests.get(url, headers=HEADERS, timeout=12)
+                if res.status_code != 200:
+                    break
+            except Exception:
+                break
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        
-        # Platomania gebruikt vaak specifieke product kaarten of artikelen
-        items = soup.find_all(["article", "div", "li"])
-        
-        for item in items:
-            text = item.get_text(separator=" ", strip=True)
-            if len(text) > 2000:  # Sla grote pagina-wrapper containers over
-                continue
+            soup = BeautifulSoup(res.text, "html.parser")
+            
+            # Platomania product-elementen
+            items = soup.find_all(["div", "article", "li"], class_=re.compile("product|item|row|album|card", re.I))
+            if not items:
+                items = soup.find_all("div")
 
-            price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-            if not price_match:
-                continue
+            page_found = 0
+            for item in items:
+                text = item.get_text(separator=" ", strip=True)
+                if len(text) > 2500:
+                    continue
 
-            # Zoek link binnen dit item
-            link_tag = item.find("a", href=True)
-            if not link_tag:
-                continue
+                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
+                if not price_match:
+                    continue
 
-            href = link_tag['href']
-            # Negeer nav-links
-            if any(x in href for x in ["/cart", "/account", "/genre", "/search", "#"]):
-                continue
+                # Zoek productlinks en negeer winkelwagen/navigatie
+                links = item.find_all("a", href=True)
+                product_link, title_text = None, ""
 
-            # Probeer titel en artiest op te halen
-            title_text = clean_title(link_tag.get_text(strip=True))
-            if not title_text or len(title_text) < 3:
-                # Probeer alt-tekst van afbeelding als fallback
-                img = item.find("img", alt=True)
-                if img:
-                    title_text = clean_title(img["alt"])
+                for link in links:
+                    href_str = link['href']
+                    if any(x in href_str.lower() for x in ["cart", "winkelwagen", "account", "login", "genre", "search", "#"]):
+                        continue
 
-            if title_text and price_match:
-                price = float(price_match.group(1).replace(",", "."))
-                full_url = urljoin("https://www.platomania.nl", href)
-                
-                found_items.append({
-                    "url": full_url,
-                    "title": title_text,
-                    "category": cat_name,
-                    "price": price,
-                    "source": "Platomania"
-                })
+                    candidate = clean_title(link.get_text(strip=True))
+                    if candidate and len(candidate) > len(title_text):
+                        title_text = candidate
+                        product_link = href_str
+
+                # Fallback: probeer de alt-tekst van een afbeelding
+                if not title_text:
+                    img = item.find("img", alt=True)
+                    if img and img.get("alt"):
+                        title_text = clean_title(img["alt"])
+
+                if price_match and product_link and title_text:
+                    price = float(price_match.group(1).replace(",", "."))
+                    full_link = urljoin("https://www.platomania.nl", product_link)
+
+                    found_items.append({
+                        "url": full_link,
+                        "title": title_text,
+                        "category": cat_name,
+                        "price": price,
+                        "source": "Platomania"
+                    })
+                    page_found += 1
+
+            # Als er op deze pagina geen unieke items meer stonden, zijn we bij het einde
+            if page_found == 0:
+                break
 
     unique_items = list({v['url']: v for v in found_items}.values())
     print(f"   ✅ Platomania: {len(unique_items)} items gevonden.")

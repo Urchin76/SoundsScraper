@@ -2,12 +2,15 @@ name: Platen Scraper & Dashboard Build
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Draait elke dag om 8:00 uur
-  workflow_dispatch:
+    - cron: '0 8 * * *'  # Draait elke dag om 8:00 uur 's ochtends
+  workflow_dispatch:      # Hiermee kun je hem ook handmatig starten via GitHub
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # Geeft GitHub Actions toestemming om bestanden te committen
+
     steps:
       - name: Code ophalen
         uses: actions/checkout@v3
@@ -15,7 +18,7 @@ jobs:
       - name: Python instellen
         uses: actions/setup-python@v4
         with:
-          python-python-version: '3.10'
+          python-version: '3.10'
 
       - name: Dependencies installeren
         run: |
@@ -27,7 +30,7 @@ jobs:
           GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
         run: python monitor.py
 
-      - name: Wijzigingen (index.html & DB) committen
+      - name: Wijzigingen (index.html & DB) opslaan en pushen
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'

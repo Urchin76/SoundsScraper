@@ -1,0 +1,38 @@
+name: Sounds.nl Daily Scraper
+
+on:
+  schedule:
+    # Draait elke dag om 08:00 UTC (09:00 / 10:00 Nederlandse tijd)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Voegt een knop toe om handmatig te testen
+
+permissions:
+  contents: write # Noodzakelijk om de databank terug op te slaan
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code ophalen
+        uses: actions/checkout@v4
+
+      - name: Python instellen
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Pakketten installeren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Scraper uitvoeren
+        run: python monitor.py
+
+      - name: Databank wijzigingen opslaan in repository
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add sounds_catalog.db
+          git diff-index --quiet HEAD || git commit -m "Automatische databank update [skip ci]"
+          git push

@@ -251,6 +251,7 @@ def generate_html_dashboard():
         .badge-velvet {{ background: #8e44ad; }}
         .badge-kroese {{ background: #27ae60; }}
         .badge-platomania {{ background: #d35400; }}
+        .badge-onbekend {{ background: #95a5a6; }}
         a.buy-btn {{ text-decoration: none; background: #3498db; color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.9em; font-weight: bold; }}
         a.buy-btn:hover {{ background: #2980b9; }}
     </style>
@@ -294,16 +295,22 @@ def generate_html_dashboard():
     """
 
     for i, (source, category, title, price, url) in enumerate(rows):
-        badge_class = f"badge-{source.split()[0].lower()}"
+        # Veilige afhandeling als source of gegevens leeg/None zijn
+        source_name = source if source else "Onbekend"
+        cat_name = category if category else "LP"
+        title_name = title if title else "Onbekende titel"
+        price_val = price if price is not None else 0.0
+
+        badge_class = f"badge-{source_name.split()[0].lower()}"
         item_id = f"item_{abs(hash(url))}"
         
         html_content += f"""
             <tr>
                 <td style="text-align: center;"><input type="checkbox" onchange="toggleRow(this)" id="{item_id}"></td>
-                <td><span class="badge {badge_class}">{source}</span></td>
-                <td><b>[{category}]</b></td>
-                <td>{title}</td>
-                <td><b>€{price:.2f}</b></td>
+                <td><span class="badge {badge_class}">{source_name}</span></td>
+                <td><b>[{cat_name}]</b></td>
+                <td>{title_name}</td>
+                <td><b>€{price_val:.2f}</b></td>
                 <td><a href="{url}" target="_blank" class="buy-btn">Bekijk</a></td>
             </tr>
         """

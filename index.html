@@ -18934,15 +18934,33 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    // 1. Laad afgevinkte items uit localStorage
     document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
         const isChecked = localStorage.getItem(cb.id) === 'true';
         cb.checked = isChecked;
-        if (isChecked) cb.closest('tr').classList.add('checked');
+        if (isChecked) {
+            const row = cb.closest('tr');
+            if (row) row.classList.add('checked');
+        }
     });
+
+    // 2. Koppel automatisch event listeners aan de zoek- en filtervelden
+    const searchInput = document.getElementById("searchInput");
+    const sourceFilter = document.getElementById("sourceFilter");
+    const catFilter = document.getElementById("catFilter");
+
+    if (searchInput) searchInput.addEventListener("input", filterTable);
+    if (sourceFilter) sourceFilter.addEventListener("change", filterTable);
+    if (catFilter) catFilter.addEventListener("change", filterTable);
+
+    // 3. Voer het filter direct uit bij het laden van de pagina
+    filterTable();
 });
 
 function toggleRow(checkbox) {
     const row = checkbox.closest('tr');
+    if (!row) return;
+
     if (checkbox.checked) {
         row.classList.add('checked');
         localStorage.setItem(checkbox.id, 'true');
@@ -18953,17 +18971,25 @@ function toggleRow(checkbox) {
 }
 
 function filterTable() {
-    const search = document.getElementById("searchInput").value.toLowerCase();
-    const source = document.getElementById("sourceFilter").value.toLowerCase();
-    const cat = document.getElementById("catFilter").value.toLowerCase();
-    
+    const searchEl = document.getElementById("searchInput");
+    const sourceEl = document.getElementById("sourceFilter");
+    const catEl = document.getElementById("catFilter");
+    const countEl = document.getElementById("rowCount");
+
+    // Veiligheidscheck: stop als de invoervelden niet bestaan in de HTML
+    if (!searchEl || !sourceEl || !catEl) return;
+
+    const search = searchEl.value.toLowerCase();
+    const source = sourceEl.value.toLowerCase();
+    const cat = catEl.value.toLowerCase();
+
     const rows = document.querySelectorAll("#itemsTable tbody tr");
     let visibleCount = 0;
 
     rows.forEach(row => {
-        const text = row.cells[3].innerText.toLowerCase();
-        const rowSource = row.cells[1].innerText.toLowerCase();
-        const rowCat = row.cells[2].innerText.toLowerCase();
+        const text = row.cells[3] ? row.cells[3].innerText.toLowerCase() : "";
+        const rowSource = row.cells[1] ? row.cells[1].innerText.toLowerCase() : "";
+        const rowCat = row.cells[2] ? row.cells[2].innerText.toLowerCase() : "";
 
         const matchesSearch = text.includes(search);
         const matchesSource = source === "" || rowSource.includes(source);
@@ -18977,7 +19003,9 @@ function filterTable() {
         }
     });
 
-    document.getElementById("rowCount").innerText = "Totaal items getoond: " + visibleCount;
+    if (countEl) {
+        countEl.innerText = "Totaal items getoond: " + visibleCount;
+    }
 }
 </script>
 

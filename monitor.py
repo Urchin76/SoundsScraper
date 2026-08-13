@@ -244,8 +244,12 @@ def scrape_platomania():
     ]
     found_items = []
 
+    # Bekende header/footer/menu-woorden die we NOOIT als titel willen
+    junk_words = ["login", "winkels", "service", "home", "aanbiedingen", "gratis bezorgd", 
+                  "winkelwagen", "resultaten", "bekijk", "account", "klantenservice"]
+
     for cat_name, base_url in base_urls:
-        for page in range(1, 25):
+        for page in range(1, 30):
             url = f"{base_url}?page={page}" if page > 1 else base_url
             try:
                 res = requests.get(url, headers=HEADERS, timeout=12)
@@ -256,36 +260,41 @@ def scrape_platomania():
 
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # Platomania gebruikt specifieke links naar artikelen (/article/ of /album/ of /release/)
-            # We zoeken gericht naar de links met hun titels
+            # Platomania product-links bevatten vrijwel altijd '/article/'
             all_links = soup.find_all("a", href=True)
             page_found = 0
 
             for link in all_links:
                 href = link['href']
                 
-                # Strikte filter tegen navigatielinks
-                if any(x in href.lower() for x in ["/cart", "/account", "/search", "/genre", "/klantenservice", "#"]):
+                # STRIKTE FILTER: Een echt product op Platomania bevat '/article/' in de URL
+                if "/article/" not in href.lower():
                     continue
 
-                # Pak het omringende HTML element (de kaart/rij van het product)
+                # Pak het omringende productblok (maximaal 600 tekens om headers te voorkomen)
                 container = link.find_parent(["article", "li", "tr", "div"])
                 if not container:
                     continue
 
                 container_text = container.get_text(separator=" ", strip=True)
+                if len(container_text) > 800:  # Sla grote wrappers over
+                    continue
+
                 price_match = re.search(r'€\s*(\d+[\.,]\d{2})', container_text)
 
                 if price_match:
                     title_text = clean_title(link.get_text(strip=True))
                     
-                    # Als de link zelf geen tekst had, probeer de alt van een afbeelding binnen de link
+                    # Fallback naar afbeelding alt-tekst als de link geen tekst heeft
                     if not title_text:
                         img = link.find("img", alt=True)
                         if img:
                             title_text = clean_title(img["alt"])
 
-                    if title_text and len(title_text) > 3 and "winkelwagen" not in title_text.lower():
+                    # Check of de titel geen rommel/menutekst is
+                    is_junk = any(junk in title_text.lower() for junk in junk_words) if title_text else True
+
+                    if title_text and not is_junk and len(title_text) > 3:
                         price = float(price_match.group(1).replace(",", "."))
                         full_url = urljoin("https://www.platomania.nl", href)
 
@@ -298,7 +307,7 @@ def scrape_platomania():
                         })
                         page_found += 1
 
-            # Stop pas als er écht geen items meer op de pagina staan
+            # Als er op deze pagina geen artikelen meer stonden, zijn we aan het einde
             if page_found == 0 and page > 1:
                 break
 

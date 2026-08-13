@@ -41,6 +41,8 @@ def send_email_notification(subject, html_content):
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    
+    # Maak de tabel aan als deze nog niet bestaat
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS catalog (
             url TEXT PRIMARY KEY,
@@ -50,6 +52,13 @@ def init_db():
             source TEXT
         )
     ''')
+    
+    # Werkt een eventuele oude database automatisch bij met de 'source' kolom
+    try:
+        cursor.execute("ALTER TABLE catalog ADD COLUMN source TEXT")
+    except sqlite3.OperationalError:
+        pass  # Kolom bestaat al, niks aan de hand!
+
     conn.commit()
     conn.close()
 

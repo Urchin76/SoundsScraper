@@ -36,7 +36,7 @@ def send_email_notification(subject, html_content):
     except Exception as e:
         print(f"❌ Fout bij versturen van e-mail: {e}")
 
-# --- DATABANK INSTELLEN ---
+# --- DATABANK INSTELLEN & REPAREREN ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -54,19 +54,28 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # Herstel ophalen van oude items die nog geen 'source' hadden
+    cursor.execute("UPDATE catalog SET source = 'Sounds.nl' WHERE (source IS NULL OR source = '' OR source = 'Onbekend') AND url LIKE '%sounds.nl%'")
+    cursor.execute("UPDATE catalog SET source = 'Kroese Online' WHERE (source IS NULL OR source = '' OR source = 'Onbekend') AND url LIKE '%kroese-online.nl%'")
+    cursor.execute("UPDATE catalog SET source = 'Velvet Music' WHERE (source IS NULL OR source = '' OR source = 'Onbekend') AND url LIKE '%velvetmusic.nl%'")
+    cursor.execute("UPDATE catalog SET source = 'Platomania' WHERE (source IS NULL OR source = '' OR source = 'Onbekend') AND url LIKE '%platomania.nl%'")
+
     conn.commit()
     conn.close()
 
-# --- SCRAPERS ---
+# -------------------------------------------------------------------
+# SCRAPERS MET PAGINERING
+# -------------------------------------------------------------------
+
 def scrape_sounds():
-    print("🔍 Scrapen van Sounds.nl...")
+    print("🔍 Scrapen van Sounds.nl (Pagina 1-8)...")
     categories = {
         "LP": "https://www.sounds.nl/uitverkoop/{page}/lp/all/art",
         "CD": "https://www.sounds.nl/uitverkoop/{page}/cd/all/art",
     }
     found_items = []
     for cat_name, url_template in categories.items():
-        for page in range(1, 3):
+        for page in range(1, 8):
             url = url_template.format(page=page)
             try:
                 res = requests.get(url, headers=HEADERS, timeout=10)
@@ -74,7 +83,10 @@ def scrape_sounds():
             except Exception: continue
 
             soup = BeautifulSoup(res.text, "html.parser")
-            for item in soup.find_all("div", class_=re.compile("product|item|row|album", re.I)) or soup.find_all("tr"):
+            items = soup.find_all("div", class_=re.compile("product|item|row|album", re.I)) or soup.find_all("tr")
+            if not items: break
+
+            for item in items:
                 text = item.get_text()
                 price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
                 link_tag = item.find("a", href=True)
@@ -90,103 +102,118 @@ def scrape_sounds():
     return found_items
 
 def scrape_kroese():
-    print("🔍 Scrapen van Kroese-Online.nl...")
-    urls = [
+    print("🔍 Scrapen van Kroese-Online.nl (Pagina 1-5)...")
+    base_urls = [
         ("LP", "https://www.kroese-online.nl/actie/Vinyl-aanbiedingen_goedkope_lp_s"),
         ("CD", "https://www.kroese-online.nl/aanbiedingen/")
     ]
     found_items = []
-    for cat_name, url in urls:
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=10)
-            if res.status_code != 200: continue
-        except Exception: continue
+    for cat_name, base_url in base_urls:
+        for page in range(1, 6):
+            url = f"{base_url}?page={page}" if page > 1 else base_url
+            try:
+                res = requests.get(url, headers=HEADERS, timeout=10)
+                if res.status_code != 200: continue
+            except Exception: continue
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        for item in soup.find_all(["div", "li"], class_=re.compile("product|item|album|grid", re.I)):
-            text = item.get_text()
-            price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-            links = item.find_all("a", href=True)
-            product_link, title_text = None, ""
+            soup = BeautifulSoup(res.text, "html.parser")
+            items = soup.find_all(["div", "li"], class_=re.compile("product|item|album|grid", re.I))
+            if not items: break
 
-            for l in links:
-                href_str = l['href']
-                if "cart" not in href_str.lower() and "basket" not in href_str.lower() and "winkelwagen" not in href_str.lower():
-                    product_link = href_str
-                    t = l.get_text(strip=True) or l.get('title', '')
-                    if len(t) > len(title_text) and "korting" not in t.lower():
-                        title_text = t
+            for item in items:
+                text = item.get_text()
+                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
+                links = item.find_all("a", href=True)
+                product_link, title_text = None, ""
 
-            if not title_text:
-                head = item.find(["h2", "h3", "h4", "strong", "span"], class_=re.compile("title|name|header", re.I))
-                if head: title_text = head.get_text(strip=True)
+                for l in links:
+                    href_str = l['href']
+                    if "cart" not in href_str.lower() and "basket" not in href_str.lower() and "winkelwagen" not in href_str.lower():
+                        product_link = href_str
+                        t = l.get_text(strip=True) or l.get('title', '')
+                        if len(t) > len(title_text) and "korting" not in t.lower():
+                            title_text = t
 
-            if price_match and product_link and title_text:
-                price = float(price_match.group(1).replace(",", "."))
-                if not product_link.startswith("http"): product_link = "https://www.kroese-online.nl" + product_link
-                found_items.append({"url": product_link, "title": title_text, "category": cat_name, "price": price, "source": "Kroese Online"})
+                if not title_text:
+                    head = item.find(["h2", "h3", "h4", "strong", "span"], class_=re.compile("title|name|header", re.I))
+                    if head: title_text = head.get_text(strip=True)
+
+                if price_match and product_link and title_text:
+                    price = float(price_match.group(1).replace(",", "."))
+                    if not product_link.startswith("http"): product_link = "https://www.kroese-online.nl" + product_link
+                    found_items.append({"url": product_link, "title": title_text, "category": cat_name, "price": price, "source": "Kroese Online"})
     return found_items
 
 def scrape_velvet():
-    print("🔍 Scrapen van VelvetMusic.nl...")
-    urls = [
+    print("🔍 Scrapen van VelvetMusic.nl (Pagina 1-8)...")
+    base_urls = [
         ("LP", "https://www.velvetmusic.nl/collections/aanbiedingen-lp"),
         ("CD", "https://www.velvetmusic.nl/collections/aanbiedingen-cd")
     ]
     found_items = []
-    for cat_name, url in urls:
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=10)
-            if res.status_code != 200: continue
-        except Exception: continue
+    for cat_name, base_url in base_urls:
+        for page in range(1, 9):
+            url = f"{base_url}?page={page}"
+            try:
+                res = requests.get(url, headers=HEADERS, timeout=10)
+                if res.status_code != 200: continue
+            except Exception: continue
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        for item in soup.find_all(["div", "article", "li"], class_=re.compile("product|card|grid-item", re.I)):
-            text = item.get_text()
-            price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-            title_tag = item.find(["a", "h2", "h3", "div", "span"], class_=re.compile("title|name|header", re.I))
-            title_text = title_tag.get_text(strip=True) if title_tag else ""
-            if not title_text or "korting" in title_text.lower() or "record store day" in title_text.lower():
-                img = item.find("img", alt=True)
-                if img and img.get("alt"): title_text = img["alt"].strip()
+            soup = BeautifulSoup(res.text, "html.parser")
+            items = soup.find_all(["div", "article", "li"], class_=re.compile("product|card|grid-item", re.I))
+            if not items: break
 
-            link_tag = item.find("a", href=True)
-            if price_match and link_tag and title_text and len(title_text) > 3:
-                price = float(price_match.group(1).replace(",", "."))
-                href = link_tag['href']
-                if not href.startswith("http"): href = "https://www.velvetmusic.nl" + href
-                found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Velvet Music"})
+            for item in items:
+                text = item.get_text()
+                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
+                title_tag = item.find(["a", "h2", "h3", "div", "span"], class_=re.compile("title|name|header", re.I))
+                title_text = title_tag.get_text(strip=True) if title_tag else ""
+                if not title_text or "korting" in title_text.lower() or "record store day" in title_text.lower():
+                    img = item.find("img", alt=True)
+                    if img and img.get("alt"): title_text = img["alt"].strip()
+
+                link_tag = item.find("a", href=True)
+                if price_match and link_tag and title_text and len(title_text) > 3:
+                    price = float(price_match.group(1).replace(",", "."))
+                    href = link_tag['href']
+                    if not href.startswith("http"): href = "https://www.velvetmusic.nl" + href
+                    found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Velvet Music"})
     return found_items
 
 def scrape_platomania():
-    print("🔍 Scrapen van Platomania.nl...")
-    urls = [
+    print("🔍 Scrapen van Platomania.nl (Pagina 1-8)...")
+    base_urls = [
         ("LP", "https://www.platomania.nl/plato-50-aanbiedingen"),
         ("LP", "https://www.platomania.nl/music-on-vinyl-sale")
     ]
     found_items = []
-    for cat_name, url in urls:
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=10)
-            if res.status_code != 200: continue
-        except Exception: continue
+    for cat_name, base_url in base_urls:
+        for page in range(1, 9):
+            url = f"{base_url}?page={page}" if page > 1 else base_url
+            try:
+                res = requests.get(url, headers=HEADERS, timeout=10)
+                if res.status_code != 200: continue
+            except Exception: continue
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        for item in soup.find_all(["div", "article", "li"], class_=re.compile("product|item|row", re.I)):
-            text = item.get_text()
-            price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-            title_tag = item.find(["a", "h2", "h3", "h4", "div", "span"], class_=re.compile("title|name|header|artist", re.I))
-            title_text = title_tag.get_text(strip=True) if title_tag else ""
-            if not title_text:
-                img = item.find("img", alt=True)
-                if img and img.get("alt"): title_text = img["alt"].strip()
+            soup = BeautifulSoup(res.text, "html.parser")
+            items = soup.find_all(["div", "article", "li"], class_=re.compile("product|item|row", re.I))
+            if not items: break
 
-            link_tag = item.find("a", href=True)
-            if price_match and link_tag and title_text and len(title_text) > 3:
-                price = float(price_match.group(1).replace(",", "."))
-                href = link_tag['href']
-                if not href.startswith("http"): href = "https://www.platomania.nl" + href
-                found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Platomania"})
+            for item in items:
+                text = item.get_text()
+                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
+                title_tag = item.find(["a", "h2", "h3", "h4", "div", "span"], class_=re.compile("title|name|header|artist", re.I))
+                title_text = title_tag.get_text(strip=True) if title_tag else ""
+                if not title_text:
+                    img = item.find("img", alt=True)
+                    if img and img.get("alt"): title_text = img["alt"].strip()
+
+                link_tag = item.find("a", href=True)
+                if price_match and link_tag and title_text and len(title_text) > 3:
+                    price = float(price_match.group(1).replace(",", "."))
+                    href = link_tag['href']
+                    if not href.startswith("http"): href = "https://www.platomania.nl" + href
+                    found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Platomania"})
     return found_items
 
 # --- VERGELIJKING EN DATABASE UPDATE ---
@@ -196,7 +223,7 @@ def process_and_compare(scraped_items):
     new_items, price_changes = [], []
 
     for item in scraped_items:
-        cursor.execute("SELECT price, title FROM catalog WHERE url = ?", (item["url"],))
+        cursor.execute("SELECT price, title, source FROM catalog WHERE url = ?", (item["url"],))
         result = cursor.fetchone()
 
         if result is None:
@@ -204,7 +231,12 @@ def process_and_compare(scraped_items):
             cursor.execute("INSERT INTO catalog (url, title, category, price, source) VALUES (?, ?, ?, ?, ?)",
                            (item["url"], item["title"], item["category"], item["price"], item["source"]))
         else:
-            old_price, old_title = result[0], result[1]
+            old_price, old_title, old_source = result[0], result[1], result[2]
+            
+            # Altijd winkelbron bijwerken als deze nog ontbrak
+            if not old_source or old_source == "Onbekend":
+                cursor.execute("UPDATE catalog SET source = ? WHERE url = ?", (item["source"], item["url"]))
+
             if old_title != item["title"] and len(item["title"]) > len(old_title):
                 cursor.execute("UPDATE catalog SET title = ? WHERE url = ?", (item["title"], item["url"]))
 
@@ -295,7 +327,6 @@ def generate_html_dashboard():
     """
 
     for i, (source, category, title, price, url) in enumerate(rows):
-        # Veilige afhandeling als source of gegevens leeg/None zijn
         source_name = source if source else "Onbekend"
         cat_name = category if category else "LP"
         title_name = title if title else "Onbekende titel"

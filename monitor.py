@@ -507,25 +507,186 @@ def main():
     print(f"\nTotaal {len(all_scraped_items)} items gevonden op de websites. Database updaten...")
     new_items, price_changes = process_and_compare(all_scraped_items)
 
-    generate_html_dashboard()
+   # --- GENEREREN VAN GITHUB PAGES INDEX.HTML ---
+def generate_html_dashboard():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT source, category, title, price, url FROM catalog ORDER BY source, price ASC")
+    rows = cursor.fetchall()
+    conn.close()
 
-    if new_items or price_changes:
-        html_body = "<h2>🎵 Platen & CD Uitverkoop Update!</h2>"
-        if new_items:
-            html_body += f"<h3>✨ Nieuw in de uitverkoop ({len(new_items)}):</h3><ul>"
-            for item in new_items:
-                html_body += f"<li><b>[{item['source']}]</b> [{item['category']}] <b>{item['title']}</b> - €{item['price']:.2f} (<a href='{item['url']}'>Bekijk</a>)</li>"
-            html_body += "</ul>"
+    badge_mapping = {
+        "Sounds.nl": "badge-sounds",
+        "Velvet Music": "badge-velvet",
+        "Kroese Online": "badge-kroese",
+        "Platomania": "badge-platomania"
+    }
 
-        if price_changes:
-            html_body += f"<h3>🏷️ Prijswijzigingen ({len(price_changes)}):</h3><ul>"
-            for change in price_changes:
-                diff = change['new_price'] - change['old_price']
-                icon = "📉" if diff < 0 else "📈"
-                html_body += f"<li>{icon} <b>[{change['source']}]</b> [{change['category']}] <b>{change['title']}</b>: van €{change['old_price']:.2f} naar <b>€{change['new_price']:.2f}</b> (<a href='{change['url']}'>Bekijk</a>)</li>"
-            html_body += "</ul>"
+    html_content = f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Platen & CD Uitverkoop Overzicht</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }}
+        h1 {{ text-align: center; color: #2c3e50; margin-bottom: 5px; }}
+        p.subtitle {{ text-align: center; color: #7f8c8d; margin-bottom: 25px; }}
+        .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        .controls {{ display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }}
+        input[type="text"], input[type="number"], select {{ padding: 10px; border: 1px solid #ccc; border-radius: 5px; flex: 1; min-width: 140px; font-size: 14px; }}
+        .stats {{ margin-bottom: 15px; font-weight: bold; color: #555; }}
+        table {{ width: 100%; border-collapse: collapse; text-align: left; }}
+        th, td {{ padding: 12px; border-bottom: 1px solid #ddd; }}
+        th {{ background: #2c3e50; color: white; }}
+        tr:hover {{ background: #f8f9fa; }}
+        tr.checked {{ opacity: 0.35; text-decoration: line-through; background: #e8f5e9; }}
+        .badge {{ padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; color: white; }}
+        .badge-sounds {{ background: #e74c3c; }}
+        .badge-velvet {{ background: #8e44ad; }}
+        .badge-kroese {{ background: #27ae60; }}
+        .badge-platomania {{ background: #d35400; }}
+        .badge-onbekend {{ background: #95a5a6; }}
+        a.buy-btn {{ text-decoration: none; background: #3498db; color: white; padding: 6px 12px; border-radius: 4px; font-size: 0.9em; font-weight: bold; }}
+        a.buy-btn:hover {{ background: #2980b9; }}
+    </style>
+</head>
+<body>
 
-        send_email_notification("Muziek Uitverkoop Update!", html_body)
+<div class="container">
+    <h1>🎵 Platen & CD Uitverkoop Overzicht</h1>
+    <p class="subtitle">Live overzicht — vinkjes worden automatisch opgeslagen in je browser</p>
+    
+    <div class="controls">
+        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="🔍 Zoek op artiest of album...">
+        <select id="sourceFilter" onchange="filterTable()">
+            <option value="">Alle winkels</option>
+            <option value="Sounds.nl">Sounds.nl</option>
+            <option value="Velvet Music">Velvet Music</option>
+            <option value="Kroese Online">Kroese Online</option>
+            <option value="Platomania">Platomania</option>
+        </select>
+        <select id="catFilter" onchange="filterTable()">
+            <option value="">Alle Dragend media (LP/CD)</option>
+            <option value="LP">LP</option>
+            <option value="CD">CD</option>
+        </select>
+        <input type="number" id="maxPriceInput" oninput="filterTable()" placeholder="💶 Max. prijs (€)" step="0.50">
+        <select id="priceSort" onchange="filterTable()">
+            <option value="asc">Prijs: Laag ➔ Hoog</option>
+            <option value="desc">Prijs: Hoog ➔ Laag</option>
+        </select>
+    </div>
 
-if __name__ == "__main__":
-    main()
+    <div class="stats" id="rowCount">Totaal items getoond: {len(rows)}</div>
+
+    <table id="itemsTable">
+        <thead>
+            <tr>
+                <th style="width: 40px;">Check</th>
+                <th>Winkel</th>
+                <th>Format</th>
+                <th>Artiest & Album</th>
+                <th>Prijs</th>
+                <th>Link</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+    """
+
+    for i, (source, category, title, price, url) in enumerate(rows):
+        source_name = source if source else "Sounds.nl"
+        cat_name = category if category else "LP"
+        title_name = title if title else "Onbekende titel"
+        price_val = price if price is not None else 0.0
+
+        badge_class = badge_mapping.get(source_name, "badge-onbekend")
+        item_id = f"item_{abs(hash(url))}"
+        
+        html_content += f"""
+            <tr data-price="{price_val}">
+                <td style="text-align: center;"><input type="checkbox" onchange="toggleRow(this)" id="{item_id}"></td>
+                <td><span class="badge {badge_class}">{source_name}</span></td>
+                <td><b>[{cat_name}]</b></td>
+                <td>{title_name}</td>
+                <td><b>€{price_val:.2f}</b></td>
+                <td><a href="{url}" target="_blank" class="buy-btn">Bekijk</a></td>
+            </tr>
+        """
+
+    html_content += """
+        </tbody>
+    </table>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        const isChecked = localStorage.getItem(cb.id) === 'true';
+        cb.checked = isChecked;
+        if (isChecked) cb.closest('tr').classList.add('checked');
+    });
+});
+
+function toggleRow(checkbox) {
+    const row = checkbox.closest('tr');
+    if (checkbox.checked) {
+        row.classList.add('checked');
+        localStorage.setItem(checkbox.id, 'true');
+    } else {
+        row.classList.remove('checked');
+        localStorage.setItem(checkbox.id, 'false');
+    }
+}
+
+function filterTable() {
+    const search = document.getElementById("searchInput").value.toLowerCase();
+    const source = document.getElementById("sourceFilter").value.toLowerCase();
+    const cat = document.getElementById("catFilter").value.toLowerCase();
+    const maxPrice = parseFloat(document.getElementById("maxPriceInput").value);
+    const sortOrder = document.getElementById("priceSort").value;
+    
+    const tbody = document.getElementById("tableBody");
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+    let visibleCount = 0;
+
+    // Sorteren
+    rows.sort((a, b) => {
+        const priceA = parseFloat(a.getAttribute("data-price")) || 0;
+        const priceB = parseFloat(b.getAttribute("data-price")) || 0;
+        return sortOrder === "asc" ? priceA - priceB : priceB - priceA;
+    });
+
+    // Herplaats gesorteerde rijen
+    rows.forEach(row => {
+        tbody.appendChild(row);
+
+        const text = row.cells[3].innerText.toLowerCase();
+        const rowSource = row.cells[1].innerText.toLowerCase();
+        const rowCat = row.cells[2].innerText.toLowerCase();
+        const rowPrice = parseFloat(row.getAttribute("data-price")) || 0;
+
+        const matchesSearch = text.includes(search);
+        const matchesSource = source === "" || rowSource.includes(source);
+        const matchesCat = cat === "" || rowCat.includes(cat);
+        const matchesPrice = isNaN(maxPrice) || rowPrice <= maxPrice;
+
+        if (matchesSearch && matchesSource && matchesCat && matchesPrice) {
+            row.style.display = "";
+            visibleCount++;
+        } else {
+            row.style.display = "none";
+        }
+    });
+
+    document.getElementById("rowCount").innerText = "Totaal items getoond: " + visibleCount;
+}
+</script>
+
+</body>
+</html>
+"""
+
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print("🌐 `index.html` succesvol gegenereerd!")

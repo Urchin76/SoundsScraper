@@ -41,8 +41,6 @@ def send_email_notification(subject, html_content):
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    
-    # Maak de tabel aan als deze nog niet bestaat
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS catalog (
             url TEXT PRIMARY KEY,
@@ -52,12 +50,10 @@ def init_db():
             source TEXT
         )
     ''')
-    
-    # Werkt een eventuele oude database automatisch bij met de 'source' kolom
     try:
         cursor.execute("ALTER TABLE catalog ADD COLUMN source TEXT")
     except sqlite3.OperationalError:
-        pass  # Kolom bestaat al, niks aan de hand!
+        pass
 
     conn.commit()
     conn.close()
@@ -122,18 +118,27 @@ def scrape_kroese():
         for item in soup.find_all("div", class_=re.compile("product|item|album|grid", re.I)) or soup.find_all("li"):
             text = item.get_text()
             price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-            link_tag = item.find("a", href=True)
+            
+            # Zoek specifiek naar links die NIET naar de winkelwagen/basket leiden
+            links = item.find_all("a", href=True)
+            product_link = None
+            for l in links:
+                href_str = l['href']
+                if "cart" not in href_str.lower() and "basket" not in href_str.lower() and "winkelwagen" not in href_str.lower():
+                    product_link = href_str
+                    break
 
-            if price_match and link_tag:
+            if price_match and product_link:
                 price = float(price_match.group(1).replace(",", "."))
-                href = link_tag['href']
-                if not href.startswith("http"): href = "https://www.kroese-online.nl" + href
+                if not product_link.startswith("http"):
+                    product_link = "https://www.kroese-online.nl" + product_link
 
-                title = link_tag.get_text().strip() or "Onbekende titel"
+                lines = [line.strip() for line in text.split("\n") if line.strip()]
+                title = lines[0] if lines else "Onbekende titel"
                 if len(title) < 3: continue
 
                 found_items.append({
-                    "url": href, "title": title, "category": cat_name, "price": price, "source": "Kroese Online"
+                    "url": product_link, "title": title, "category": cat_name, "price": price, "source": "Kroese Online"
                 })
     return found_items
 
@@ -267,17 +272,16 @@ def main():
     if new_items or price_changes:
         html_body = "<h2>🎵 Platen & CD Uitverkoop Update!</h2>"
 
+        # Volledige lijst tonen (geen limiet meer)
         if new_items:
             html_body += f"<h3>✨ Nieuw in de uitverkoop ({len(new_items)}):</h3><ul>"
-            for item in new_items[:25]:  # Toon maximaal 25 items
+            for item in new_items:
                 html_body += f"<li><b>[{item['source']}]</b> [{item['category']}] <b>{item['title']}</b> - €{item['price']:.2f} (<a href='{item['url']}'>Bekijk</a>)</li>"
-            if len(new_items) > 25:
-                html_body += f"<li><i>...en nog {len(new_items) - 25} andere nieuwe items.</i></li>"
             html_body += "</ul>"
 
         if price_changes:
             html_body += f"<h3>🏷️ Prijswijzigingen ({len(price_changes)}):</h3><ul>"
-            for change in price_changes[:20]:
+            for change in price_changes:
                 diff = change['new_price'] - change['old_price']
                 icon = "📉" if diff < 0 else "📈"
                 html_body += f"<li>{icon} <b>[{change['source']}]</b> [{change['category']}] <b>{change['title']}</b>: van €{change['old_price']:.2f} naar <b>€{change['new_price']:.2f}</b> (<a href='{change['url']}'>Bekijk</a>)</li>"

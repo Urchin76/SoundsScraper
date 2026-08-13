@@ -2,21 +2,21 @@ name: Platen Scraper & Dashboard Build
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Draait elke dag om 8:00 uur 's ochtends
-  workflow_dispatch:      # Hiermee kun je hem ook handmatig starten via GitHub
+    - cron: '0 8 * * *'  # Elke dag om 8:00 uur
+  workflow_dispatch:      # Handmatig starten
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # Geeft GitHub Actions toestemming om bestanden te committen
+      contents: write     # Essentieel om te mogen pushen naar de repo
 
     steps:
       - name: Code ophalen
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Python instellen
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -35,5 +35,4 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add index.html sounds_catalog.db
-          git commit -m "Automatische update catalogus & dashboard [skip ci]" || exit 0
-          git push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automatische update catalogus & dashboard [skip ci]" && git push)

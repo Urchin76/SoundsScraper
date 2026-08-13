@@ -2,12 +2,11 @@ name: Sounds.nl Daily Scraper
 
 on:
   schedule:
-    # Draait elke dag om 08:00 UTC (09:00 / 10:00 Nederlandse tijd)
     - cron: '0 8 * * *'
-  workflow_dispatch: # Voegt een knop toe om handmatig te testen
+  workflow_dispatch:
 
 permissions:
-  contents: write # Noodzakelijk om de databank terug op te slaan
+  contents: write
 
 jobs:
   scrape:
@@ -30,9 +29,16 @@ jobs:
         run: python monitor.py
 
       - name: Databank wijzigingen opslaan in repository
+        if: always() # Draait ook als er kleine waarschuwingen waren
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add sounds_catalog.db
-          git diff-index --quiet HEAD || git commit -m "Automatische databank update [skip ci]"
-          git push
+          
+          # Check of de databank bestaat alvorens toe te voegen
+          if [ -f sounds_catalog.db ]; then
+            git add sounds_catalog.db
+            git diff-index --quiet HEAD || git commit -m "Automatische databank update [skip ci]"
+            git push
+          else
+            echo "Databankbestand niet gevonden, opslaan overgeslagen."
+          fi

@@ -255,56 +255,67 @@ def scrape_platomania():
                 break
 
             soup = BeautifulSoup(res.text, "html.parser")
-            
-            # STAP 1: Verwijder de rommel van de pagina (header, nav, footer)
-            for tag in soup(["header", "nav", "footer", "script", "style"]):
+
+            # Verwijder navigatie, header en footer voor de zekerheid
+            for tag in soup(["header", "nav", "footer"]):
                 tag.decompose()
 
-            # STAP 2: Zoek producten in de schone HTML
-            all_links = soup.find_all("a", href=True)
+            # Zoek direct alle prijselementen met de klasse 'article__price'
+            price_nodes = soup.find_all(class_=re.compile(r"article__price", re.I))
             page_found = 0
 
-            for link in all_links:
-                href = link['href']
-                
-                # Pak het directe productblokje rond de link
-                container = link.find_parent(["article", "li", "tr", "div"])
-                if not container:
+            for p_node in price_nodes:
+                # Pak het omringende productkaartje (de parent container)
+                card = p_node.find_parent(class_=re.compile(r"article", re.I)) or p_node.parent
+                if not card:
                     continue
 
-                container_text = container.get_text(separator=" ", strip=True)
-                
-                # Sla hele grote containers over
-                if len(container_text) > 600:
+                # Prijs ophalen
+                price_text = p_node.get_text(strip=True)
+                price_match = re.search(r'€?\s*(\d+[\.,]\d{2})', price_text)
+                if not price_match:
                     continue
 
-                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', container_text)
+                price = float(price_match.group(1).replace(",", "."))
 
-                if price_match:
-                    title_text = clean_title(link.get_text(strip=True))
-                    
-                    if not title_text:
-                        img = link.find("img", alt=True)
+                # Titel en URL zoeken binnen de productkaart
+                title = ""
+                full_url = ""
+
+                # Zoek de productlink
+                link = card.find("a", href=True)
+                if link:
+                    full_url = urljoin("https://www.platomania.nl", link['href'])
+                    title = clean_title(link.get_text(strip=True))
+
+                    # Als de link zelf geen tekst had (bijv. een plaatje), pak de alt-tekst van de afbeelding
+                    if not title:
+                        img = card.find("img", alt=True)
                         if img:
-                            title_text = clean_title(img["alt"])
+                            title = clean_title(img["alt"])
 
-                    # Geen pagineringstekst of winkelwagenknoppen accepteren
-                    if title_text and len(title_text) > 3 and not re.search(r'resultaten|van de|winkelwagen|bekijk', title_text, re.I):
-                        price = float(price_match.group(1).replace(",", "."))
-                        full_url = urljoin("https://www.platomania.nl", href)
+                # Fallback: zoek titel in article__content of article-list__description
+                if not title:
+                    content_node = card.find(class_=re.compile(r"article.*content|article-list__description", re.I))
+                    if content_node:
+                        title = clean_title(content_node.get_text(strip=True))
 
-                        found_items.append({
-                            "url": full_url,
-                            "title": title_text,
-                            "category": cat_name,
-                            "price": price,
-                            "source": "Platomania"
-                        })
-                        page_found += 1
+                # Bewaar het item als er een titel is gevonden
+                if title and len(title) > 2 and price > 0:
+                    found_items.append({
+                        "url": full_url or url,
+                        "title": title,
+                        "category": cat_name,
+                        "price": price,
+                        "source": "Platomania"
+                    })
+                    page_found += 1
 
+            # Stop met doorbladeren als een pagina geen producten bevat
             if page_found == 0 and page > 1:
                 break
 
+    # Verwijder dubbele resultaten op basis van URL
     unique_items = list({v['url']: v for v in found_items}.values())
     print(f"   ✅ Platomania: {len(unique_items)} items gevonden.")
     return unique_items

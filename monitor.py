@@ -238,8 +238,6 @@ def scrape_velvet():
 
 def scrape_platomania():
     print("🚀 === DIT IS DE NIEUWE GEUPDATE SCRAPER VERSION 2.0 ===")
-    # ... de rest van de functie ...
-    print("🔍 Scrapen van Platomania.nl...")
     base_urls = [
         ("LP", "https://www.platomania.nl/vinyl-aanbiedingen"),
         ("CD", "https://www.platomania.nl/search/results?search_in=sale&format=cd")
@@ -248,7 +246,6 @@ def scrape_platomania():
 
     for cat_name, base_url in base_urls:
         for page in range(1, 30):
-            # Gebruik expliciet de ?page= parameter
             url = f"{base_url}?page={page}" if page > 1 else base_url
             
             try:
@@ -260,26 +257,22 @@ def scrape_platomania():
 
             soup = BeautifulSoup(res.text, "html.parser")
 
-            # Verwijder navigatie, header en footer om valse matches te voorkomen
-            for tag in soup(["header", "nav", "footer"]):
+            # 1. Vernietig menu's, headers, footers
+            for tag in soup(["header", "nav", "footer", "script", "style"]):
                 tag.decompose()
 
-            # Zoek alle productkaarten via hun prijs
+            # 2. Zoek alle prijsblokken
             price_nodes = soup.find_all(class_=re.compile(r"article__price", re.I))
-            
-            # Als er op deze pagina geen enkel artikelblok staat, zijn we aan het einde
             if not price_nodes:
                 break
 
             page_found = 0
 
             for p_node in price_nodes:
-                # Pak het omringende productkaartje
                 card = p_node.find_parent(class_=re.compile(r"article", re.I)) or p_node.parent
                 if not card:
                     continue
 
-                # Prijs ophalen
                 price_text = p_node.get_text(strip=True)
                 price_match = re.search(r'€?\s*(\d+[\.,]\d{2})', price_text)
                 if not price_match:
@@ -287,30 +280,26 @@ def scrape_platomania():
 
                 price = float(price_match.group(1).replace(",", "."))
 
-                # Doorzoek ALLE links in dit specifieke kaartje en sla rommel-links over
                 title = ""
                 full_url = ""
 
+                # Zoek de echte albumlink in dit kaartje
                 for link in card.find_all("a", href=True):
                     href = link['href']
                     
-                    # Sla verlanglijst/login/winkelwagen knoppen over
-                    if any(bad in href.lower() for bad in ["login", "cart", "winkelwagen", "wishlist"]):
+                    if any(bad in href.lower() for bad in ["login", "cart", "winkelwagen", "wishlist", "account"]):
                         continue
 
                     link_text = clean_title(link.get_text(strip=True))
-                    
-                    # Als de link zelf geen tekst heeft (bijv. de cover-afbeelding), pak de alt-tekst
                     if not link_text:
                         img = link.find("img", alt=True)
                         if img:
                             link_text = clean_title(img["alt"])
 
-                    # Sla generieke knoppen over
-                    if link_text and link_text.lower() not in ["login", "bestel", "bekijk", "in winkelwagen"]:
+                    if link_text and link_text.lower() not in ["login", "bestel", "bekijk", "in winkelwagen", "service", "winkels", "home"]:
                         title = link_text
                         full_url = urljoin("https://www.platomania.nl", href)
-                        break  # Echte albumlink gevonden!
+                        break
 
                 if title and len(title) > 2 and price > 0:
                     found_items.append({
@@ -322,15 +311,12 @@ def scrape_platomania():
                     })
                     page_found += 1
 
-            # Als er na verwerking van de pagina 0 geldige artikelen zijn toegevoegd, stoppen
             if page_found == 0:
                 break
 
-    # Unieke items op basis van URL filteren
     unique_items = list({v['url']: v for v in found_items}.values())
     print(f"   ✅ Platomania: {len(unique_items)} items gevonden.")
     return unique_items
-
 # --- VERGELIJKING EN DATABASE UPDATE ---
 def process_and_compare(scraped_items):
     conn = sqlite3.connect(DB_NAME)

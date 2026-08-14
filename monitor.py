@@ -256,16 +256,16 @@ def scrape_platomania():
 
             soup = BeautifulSoup(res.text, "html.parser")
 
-            # Verwijder navigatie, header en footer voor de zekerheid
+            # Verwijder navigatie, header en footer
             for tag in soup(["header", "nav", "footer"]):
                 tag.decompose()
 
-            # Zoek direct alle prijselementen met de klasse 'article__price'
+            # Zoek alle productblokken via hun prijs
             price_nodes = soup.find_all(class_=re.compile(r"article__price", re.I))
             page_found = 0
 
             for p_node in price_nodes:
-                # Pak het omringende productkaartje (de parent container)
+                # Pak het omringende productkaartje
                 card = p_node.find_parent(class_=re.compile(r"article", re.I)) or p_node.parent
                 if not card:
                     continue
@@ -278,29 +278,32 @@ def scrape_platomania():
 
                 price = float(price_match.group(1).replace(",", "."))
 
-                # Titel en URL zoeken binnen de productkaart
+                # Doorzoek ALLE links in dit kaartje en sla login/winkelwagen links over
                 title = ""
                 full_url = ""
 
-                # Zoek de productlink
-                link = card.find("a", href=True)
-                if link:
-                    full_url = urljoin("https://www.platomania.nl", link['href'])
-                    title = clean_title(link.get_text(strip=True))
+                for link in card.find_all("a", href=True):
+                    href = link['href']
+                    
+                    # Sla verlanglijst/login/winkelwagen knoppen over
+                    if any(bad in href.lower() for bad in ["login", "cart", "winkelwagen", "wishlist"]):
+                        continue
 
-                    # Als de link zelf geen tekst had (bijv. een plaatje), pak de alt-tekst van de afbeelding
-                    if not title:
-                        img = card.find("img", alt=True)
+                    link_text = clean_title(link.get_text(strip=True))
+                    
+                    # Als de link zelf geen tekst heeft (bijv. de albumhoes afbeelding), pak de alt-tekst
+                    if not link_text:
+                        img = link.find("img", alt=True)
                         if img:
-                            title = clean_title(img["alt"])
+                            link_text = clean_title(img["alt"])
 
-                # Fallback: zoek titel in article__content of article-list__description
-                if not title:
-                    content_node = card.find(class_=re.compile(r"article.*content|article-list__description", re.I))
-                    if content_node:
-                        title = clean_title(content_node.get_text(strip=True))
+                    # Negeer generieke knopteksten
+                    if link_text and link_text.lower() not in ["login", "bestel", "bekijk", "in winkelwagen"]:
+                        title = link_text
+                        full_url = urljoin("https://www.platomania.nl", href)
+                        break  # We hebben de echte albumlink gevonden!
 
-                # Bewaar het item als er een titel is gevonden
+                # Bewaar het item als we een geldige titel hebben
                 if title and len(title) > 2 and price > 0:
                     found_items.append({
                         "url": full_url or url,
@@ -311,11 +314,10 @@ def scrape_platomania():
                     })
                     page_found += 1
 
-            # Stop met doorbladeren als een pagina geen producten bevat
+            # Als een pagina geen producten meer bevat, stop met bladeren
             if page_found == 0 and page > 1:
                 break
 
-    # Verwijder dubbele resultaten op basis van URL
     unique_items = list({v['url']: v for v in found_items}.values())
     print(f"   ✅ Platomania: {len(unique_items)} items gevonden.")
     return unique_items

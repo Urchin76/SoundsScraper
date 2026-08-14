@@ -237,6 +237,8 @@ def scrape_velvet():
     return found_items
 
 def scrape_platomania():
+    print("🚀 === DIT IS DE NIEUWE GEUPDATE SCRAPER VERSION 2.0 ===")
+    # ... de rest van de functie ...
     print("🔍 Scrapen van Platomania.nl...")
     base_urls = [
         ("LP", "https://www.platomania.nl/vinyl-aanbiedingen"),

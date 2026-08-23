@@ -372,6 +372,32 @@ def generate_html_dashboard():
         "Platomania": "badge-platomania"
     }
 
+    table_rows_html = []
+    for source, category, title, price, url in rows:
+        source_name = source if source else "Sounds.nl"
+        cat_name = category if category else "LP"
+        title_name = html.escape(title if title else "Onbekende titel")
+        price_val = price if price is not None else 0.0
+        safe_url = html.escape(url)
+
+        badge_class = badge_mapping.get(source_name, "badge-onbekend")
+        
+        # Data-url attribuut toegevoegd voor JS tracking
+        row_str = f"""
+            <tr data-price="{price_val}" data-url="{safe_url}">
+                <td style="text-align: center;">
+                    <input type="checkbox" onchange="hideItem(this, '{safe_url}')" title="Verberg dit item definitief">
+                </td>
+                <td><span class="badge {badge_class}">{html.escape(source_name)}</span></td>
+                <td><b>[{html.escape(cat_name)}]</b></td>
+                <td>{title_name}</td>
+                <td><b>€{price_val:.2f}</b></td>
+                <td><a href="{safe_url}" target="_blank" class="buy-btn">Bekijk</a></td>
+            </tr>"""
+        table_rows_html.append(row_str)
+
+    rows_joined = "\n".join(table_rows_html)
+
     html_content = f"""<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -383,14 +409,16 @@ def generate_html_dashboard():
         h1 {{ text-align: center; color: #2c3e50; margin-bottom: 5px; }}
         p.subtitle {{ text-align: center; color: #7f8c8d; margin-bottom: 25px; }}
         .container {{ max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        .controls {{ display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }}
+        .controls {{ display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }}
         input[type="text"], input[type="number"], select {{ padding: 10px; border: 1px solid #ccc; border-radius: 5px; flex: 1; min-width: 140px; font-size: 14px; }}
-        .stats {{ margin-bottom: 15px; font-weight: bold; color: #555; }}
+        .stats-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }}
+        .stats {{ font-weight: bold; color: #555; }}
+        .reset-btn {{ background: #e74c3c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85em; }}
+        .reset-btn:hover {{ background: #c0392b; }}
         table {{ width: 100%; border-collapse: collapse; text-align: left; }}
         th, td {{ padding: 12px; border-bottom: 1px solid #ddd; }}
         th {{ background: #2c3e50; color: white; }}
         tr:hover {{ background: #f8f9fa; }}
-        tr.checked {{ opacity: 0.35; text-decoration: line-through; background: #e8f5e9; }}
         .badge {{ padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; color: white; }}
         .badge-sounds {{ background: #e74c3c; }}
         .badge-velvet {{ background: #8e44ad; }}
@@ -403,6 +431,141 @@ def generate_html_dashboard():
 </head>
 <body>
 
+<div class="container">
+    <h1>🎵 Platen & CD Uitverkoop Overzicht</h1>
+    <p class="subtitle">Live overzicht — vink een item aan om het permanent te verbergen</p>
+    
+    <div class="controls">
+        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="🔍 Zoek op artiest of album...">
+        <select id="sourceFilter" onchange="filterTable()">
+            <option value="">Alle winkels</option>
+            <option value="Sounds.nl">Sounds.nl</option>
+            <option value="Velvet Music">Velvet Music</option>
+            <option value="Kroese Online">Kroese Online</option>
+            <option value="Platomania">Platomania</option>
+        </select>
+        <select id="catFilter" onchange="filterTable()">
+            <option value="">Alle Dragend media (LP/CD)</option>
+            <option value="LP">LP</option>
+            <option value="CD">CD</option>
+        </select>
+        <input type="number" id="maxPriceInput" oninput="filterTable()" placeholder="💶 Max. prijs (€)" step="0.50">
+        <select id="priceSort" onchange="filterTable()">
+            <option value="asc">Prijs: Laag ➔ Hoog</option>
+            <option value="desc">Prijs: Hoog ➔ Laag</option>
+        </select>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stats" id="rowCount">Totaal items getoond: {len(rows)}</div>
+        <button class="reset-btn" onclick="resetHiddenItems()">🔄 Verborgen items herstellen</button>
+    </div>
+
+    <table id="itemsTable">
+        <thead>
+            <tr>
+                <th style="width: 50px; text-align: center;">Weg</th>
+                <th>Winkel</th>
+                <th>Format</th>
+                <th>Artiest & Album</th>
+                <th>Prijs</th>
+                <th>Link</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+{rows_joined}
+        </tbody>
+    </table>
+</div>
+
+<script>
+// Haal de lijst van verborgen URL's op uit LocalStorage
+function getHiddenUrls() {{
+    const hidden = localStorage.getItem("hidden_albums");
+    return hidden ? JSON.parse(hidden) : [];
+}}
+
+// Verberg een item als de checkbox wordt aangevinkt
+function hideItem(checkbox, url) {{
+    if (checkbox.checked) {{
+        let hiddenUrls = getHiddenUrls();
+        if (!hiddenUrls.includes(url)) {{
+            hiddenUrls.push(url);
+            localStorage.setItem("hidden_albums", JSON.stringify(hiddenUrls));
+        }}
+        // Verberg de rij direct uit het zicht
+        const row = checkbox.closest('tr');
+        row.style.display = "none";
+        filterTable(); // Herbereken het aantal getoonde items
+    }}
+}}
+
+// Herstel alle verborgen items
+function resetHiddenItems() {{
+    if (confirm("Weet je zeker dat je alle verborgen items weer wilt tonen?")) {{
+        localStorage.removeItem("hidden_albums");
+        location.reload();
+    }}
+}}
+
+function filterTable() {{
+    const search = document.getElementById("searchInput").value.toLowerCase();
+    const source = document.getElementById("sourceFilter").value.toLowerCase();
+    const cat = document.getElementById("catFilter").value.toLowerCase();
+    const maxPrice = parseFloat(document.getElementById("maxPriceInput").value);
+    const sortOrder = document.getElementById("priceSort").value;
+    const hiddenUrls = getHiddenUrls();
+    
+    const tbody = document.getElementById("tableBody");
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+    let visibleCount = 0;
+
+    // Sorteer rijen
+    rows.sort((a, b) => {{
+        const priceA = parseFloat(a.getAttribute("data-price")) || 0;
+        const priceB = parseFloat(b.getAttribute("data-price")) || 0;
+        return sortOrder === "asc" ? priceA - priceB : priceB - priceA;
+    }});
+
+    rows.forEach(row => {{
+        tbody.appendChild(row);
+
+        const rowUrl = row.getAttribute("data-url");
+        const text = row.cells[3].innerText.toLowerCase();
+        const rowSource = row.cells[1].innerText.toLowerCase();
+        const rowCat = row.cells[2].innerText.toLowerCase();
+        const rowPrice = parseFloat(row.getAttribute("data-price")) || 0;
+
+        // Controleer of de URL op de verborgen lijst staat
+        const isHidden = hiddenUrls.includes(rowUrl);
+        const matchesSearch = text.includes(search);
+        const matchesSource = source === "" || rowSource.includes(source);
+        const matchesCat = cat === "" || rowCat.includes(cat);
+        const matchesPrice = isNaN(maxPrice) || rowPrice <= maxPrice;
+
+        if (!isHidden && matchesSearch && matchesSource && matchesCat && matchesPrice) {{
+            row.style.display = "";
+            visibleCount++;
+        }} else {{
+            row.style.display = "none";
+        }}
+    }});
+
+    document.getElementById("rowCount").innerText = "Totaal items getoond: " + visibleCount;
+}}
+
+// Voer de filtering direct uit bij het laden van de pagina
+document.addEventListener("DOMContentLoaded", filterTable);
+</script>
+
+</body>
+</html>
+"""
+
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print("🌐 `index.html` succesvol gegenereerd met verberg-functionaliteit!")
+    
 <div class="container">
     <h1>🎵 Platen & CD Uitverkoop Overzicht</h1>
     <p class="subtitle">Live overzicht — vinkjes worden automatisch opgeslagen in je browser</p>

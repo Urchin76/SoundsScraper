@@ -3,6 +3,7 @@ import re
 import os
 import requests
 import smtplib
+import html
 from urllib.parse import urljoin
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -117,7 +118,7 @@ def scrape_sounds():
                         page_found += 1
             if page_found == 0: break
 
-    print(f"   ✅ Sounds.nl: {len(found_items)} items gevonden.")
+    print(f"    ✅ Sounds.nl: {len(found_items)} items gevonden.")
     return found_items
 
 def scrape_kroese():
@@ -140,19 +141,15 @@ def scrape_kroese():
 
             soup = BeautifulSoup(res.text, "html.parser")
             
-            # Verwijder navigatie/header
             for tag in soup(["header", "nav", "footer"]):
                 tag.decompose()
 
             page_found = 0
-
-            # Kroese items zitten in divs of list-items
             containers = soup.find_all(["div", "li", "article"])
 
             for container in containers:
                 text = container.get_text(separator=" ", strip=True)
                 
-                # Alleen kleine blokjes bekijken (een afzonderlijk product)
                 if len(text) > 400 or len(text) < 10:
                     continue
 
@@ -160,7 +157,6 @@ def scrape_kroese():
                 if not price_match:
                     continue
 
-                # Zoek de link binnen de container
                 link = container.find("a", href=True)
                 if not link:
                     continue
@@ -192,7 +188,7 @@ def scrape_kroese():
                 break
 
     unique_items = list({v['url']: v for v in found_items}.values())
-    print(f"   ✅ Kroese Online: {len(unique_items)} items gevonden.")
+    print(f"    ✅ Kroese Online: {len(unique_items)} items gevonden.")
     return unique_items
     
 def scrape_velvet():
@@ -242,7 +238,7 @@ def scrape_velvet():
 
             if page_found == 0: break
 
-    print(f"   ✅ Velvet Music: {len(found_items)} items gevonden.")
+    print(f"    ✅ Velvet Music: {len(found_items)} items gevonden.")
     return found_items
 
 def scrape_platomania():
@@ -266,24 +262,17 @@ def scrape_platomania():
 
             soup = BeautifulSoup(res.text, "html.parser")
 
-            # Verwijder navigatie, header en footer
             for tag in soup(["header", "nav", "footer", "script", "style"]):
                 tag.decompose()
 
-            # Zoek artikelen direct via links die naar /article/ of /album/ of /release/ wijzen
-            # OF via containers waarin een prijs én een geldige link staat
             page_found = 0
-            
-            # We zoeken alle artikel/product containers
             cards = soup.find_all(class_=re.compile(r"article|product-card|item", re.I))
             if not cards:
-                # Fallback: zoek op alle 'div' elementen met een prijs
                 cards = [div for div in soup.find_all("div") if re.search(r'€\s*\d+', div.get_text())]
 
             for card in cards:
                 card_text = card.get_text(separator=" ", strip=True)
                 
-                # Voorkom dat we de hele pagina als 1 card zien
                 if len(card_text) > 800:
                     continue
 
@@ -293,7 +282,6 @@ def scrape_platomania():
 
                 price = float(price_match.group(1).replace(",", "."))
 
-                # Zoek een geschikte link binnen het kaartje
                 for link in card.find_all("a", href=True):
                     href = link['href']
                     if any(bad in href.lower() for bad in ["login", "cart", "winkelwagen", "wishlist", "account", "service", "winkels"]):
@@ -315,14 +303,15 @@ def scrape_platomania():
                             "source": "Platomania"
                         })
                         page_found += 1
-                        break # 1 titel per kaartje is genoeg
+                        break
 
             if page_found == 0 and page > 1:
                 break
 
     unique_items = list({v['url']: v for v in found_items}.values())
-    print(f"   ✅ Platomania: {len(unique_items)} items gevonden.")
+    print(f"    ✅ Platomania: {len(unique_items)} items gevonden.")
     return unique_items
+
 # --- VERGELIJKING EN DATABASE UPDATE ---
 def process_and_compare(scraped_items):
     conn = sqlite3.connect(DB_NAME)
@@ -382,7 +371,6 @@ def generate_html_dashboard():
 
         badge_class = badge_mapping.get(source_name, "badge-onbekend")
         
-        # Data-url attribuut toegevoegd voor JS tracking
         row_str = f"""
             <tr data-price="{price_val}" data-url="{safe_url}">
                 <td style="text-align: center;">
@@ -479,13 +467,11 @@ def generate_html_dashboard():
 </div>
 
 <script>
-// Haal de lijst van verborgen URL's op uit LocalStorage
 function getHiddenUrls() {{
     const hidden = localStorage.getItem("hidden_albums");
     return hidden ? JSON.parse(hidden) : [];
 }}
 
-// Verberg een item als de checkbox wordt aangevinkt
 function hideItem(checkbox, url) {{
     if (checkbox.checked) {{
         let hiddenUrls = getHiddenUrls();
@@ -493,14 +479,12 @@ function hideItem(checkbox, url) {{
             hiddenUrls.push(url);
             localStorage.setItem("hidden_albums", JSON.stringify(hiddenUrls));
         }}
-        // Verberg de rij direct uit het zicht
         const row = checkbox.closest('tr');
         row.style.display = "none";
-        filterTable(); // Herbereken het aantal getoonde items
+        filterTable();
     }}
 }}
 
-// Herstel alle verborgen items
 function resetHiddenItems() {{
     if (confirm("Weet je zeker dat je alle verborgen items weer wilt tonen?")) {{
         localStorage.removeItem("hidden_albums");
@@ -520,7 +504,6 @@ function filterTable() {{
     const rows = Array.from(tbody.querySelectorAll("tr"));
     let visibleCount = 0;
 
-    // Sorteer rijen
     rows.sort((a, b) => {{
         const priceA = parseFloat(a.getAttribute("data-price")) || 0;
         const priceB = parseFloat(b.getAttribute("data-price")) || 0;
@@ -536,7 +519,6 @@ function filterTable() {{
         const rowCat = row.cells[2].innerText.toLowerCase();
         const rowPrice = parseFloat(row.getAttribute("data-price")) || 0;
 
-        // Controleer of de URL op de verborgen lijst staat
         const isHidden = hiddenUrls.includes(rowUrl);
         const matchesSearch = text.includes(search);
         const matchesSource = source === "" || rowSource.includes(source);
@@ -554,7 +536,6 @@ function filterTable() {{
     document.getElementById("rowCount").innerText = "Totaal items getoond: " + visibleCount;
 }}
 
-// Voer de filtering direct uit bij het laden van de pagina
 document.addEventListener("DOMContentLoaded", filterTable);
 </script>
 
@@ -565,144 +546,6 @@ document.addEventListener("DOMContentLoaded", filterTable);
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
     print("🌐 `index.html` succesvol gegenereerd met verberg-functionaliteit!")
-    
-<div class="container">
-    <h1>🎵 Platen & CD Uitverkoop Overzicht</h1>
-    <p class="subtitle">Live overzicht — vinkjes worden automatisch opgeslagen in je browser</p>
-    
-    <div class="controls">
-        <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="🔍 Zoek op artiest of album...">
-        <select id="sourceFilter" onchange="filterTable()">
-            <option value="">Alle winkels</option>
-            <option value="Sounds.nl">Sounds.nl</option>
-            <option value="Velvet Music">Velvet Music</option>
-            <option value="Kroese Online">Kroese Online</option>
-            <option value="Platomania">Platomania</option>
-        </select>
-        <select id="catFilter" onchange="filterTable()">
-            <option value="">Alle Dragend media (LP/CD)</option>
-            <option value="LP">LP</option>
-            <option value="CD">CD</option>
-        </select>
-        <input type="number" id="maxPriceInput" oninput="filterTable()" placeholder="💶 Max. prijs (€)" step="0.50">
-        <select id="priceSort" onchange="filterTable()">
-            <option value="asc">Prijs: Laag ➔ Hoog</option>
-            <option value="desc">Prijs: Hoog ➔ Laag</option>
-        </select>
-    </div>
-
-    <div class="stats" id="rowCount">Totaal items getoond: {len(rows)}</div>
-
-    <table id="itemsTable">
-        <thead>
-            <tr>
-                <th style="width: 40px;">Check</th>
-                <th>Winkel</th>
-                <th>Format</th>
-                <th>Artiest & Album</th>
-                <th>Prijs</th>
-                <th>Link</th>
-            </tr>
-        </thead>
-        <tbody id="tableBody">
-    """
-
-    for i, (source, category, title, price, url) in enumerate(rows):
-        source_name = source if source else "Sounds.nl"
-        cat_name = category if category else "LP"
-        title_name = title if title else "Onbekende titel"
-        price_val = price if price is not None else 0.0
-
-        badge_class = badge_mapping.get(source_name, "badge-onbekend")
-        item_id = f"item_{abs(hash(url))}"
-        
-        html_content += f"""
-            <tr data-price="{price_val}">
-                <td style="text-align: center;"><input type="checkbox" onchange="toggleRow(this)" id="{item_id}"></td>
-                <td><span class="badge {badge_class}">{source_name}</span></td>
-                <td><b>[{cat_name}]</b></td>
-                <td>{title_name}</td>
-                <td><b>€{price_val:.2f}</b></td>
-                <td><a href="{url}" target="_blank" class="buy-btn">Bekijk</a></td>
-            </tr>
-        """
-
-    html_content += """
-        </tbody>
-    </table>
-</div>
-
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-        const isChecked = localStorage.getItem(cb.id) === 'true';
-        cb.checked = isChecked;
-        if (isChecked) cb.closest('tr').classList.add('checked');
-    });
-});
-
-function toggleRow(checkbox) {
-    const row = checkbox.closest('tr');
-    if (checkbox.checked) {
-        row.classList.add('checked');
-        localStorage.setItem(checkbox.id, 'true');
-    } else {
-        row.classList.remove('checked');
-        localStorage.setItem(checkbox.id, 'false');
-    }
-}
-
-function filterTable() {
-    const search = document.getElementById("searchInput").value.toLowerCase();
-    const source = document.getElementById("sourceFilter").value.toLowerCase();
-    const cat = document.getElementById("catFilter").value.toLowerCase();
-    const maxPrice = parseFloat(document.getElementById("maxPriceInput").value);
-    const sortOrder = document.getElementById("priceSort").value;
-    
-    const tbody = document.getElementById("tableBody");
-    const rows = Array.from(tbody.querySelectorAll("tr"));
-    let visibleCount = 0;
-
-    // Sorteren
-    rows.sort((a, b) => {
-        const priceA = parseFloat(a.getAttribute("data-price")) || 0;
-        const priceB = parseFloat(b.getAttribute("data-price")) || 0;
-        return sortOrder === "asc" ? priceA - priceB : priceB - priceA;
-    });
-
-    // Herplaats gesorteerde rijen
-    rows.forEach(row => {
-        tbody.appendChild(row);
-
-        const text = row.cells[3].innerText.toLowerCase();
-        const rowSource = row.cells[1].innerText.toLowerCase();
-        const rowCat = row.cells[2].innerText.toLowerCase();
-        const rowPrice = parseFloat(row.getAttribute("data-price")) || 0;
-
-        const matchesSearch = text.includes(search);
-        const matchesSource = source === "" || rowSource.includes(source);
-        const matchesCat = cat === "" || rowCat.includes(cat);
-        const matchesPrice = isNaN(maxPrice) || rowPrice <= maxPrice;
-
-        if (matchesSearch && matchesSource && matchesCat && matchesPrice) {
-            row.style.display = "";
-            visibleCount++;
-        } else {
-            row.style.display = "none";
-        }
-    });
-
-    document.getElementById("rowCount").innerText = "Totaal items getoond: " + visibleCount;
-}
-</script>
-
-</body>
-</html>
-"""
-
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
-    print("🌐 `index.html` succesvol gegenereerd!")
 
 # --- MAIN ---
 def main():
@@ -724,7 +567,7 @@ def main():
     # 2. Optioneel e-mail notificatie versturen bij nieuwe items
     if new_items or price_changes:
         subject = f"🎵 Sale Monitor: {len(new_items)} nieuwe items / {len(price_changes)} prijswijzigingen"
-        body = f"<h2>Er zijn update's in de platenkast!</h2>"
+        body = f"<h2>Er zijn updates in de platenkast!</h2>"
         body += f"<p>Aantal nieuwe items: <b>{len(new_items)}</b></p>"
         body += f"<p>Aantal prijswijzigingen: <b>{len(price_changes)}</b></p>"
         send_email_notification(subject, body)

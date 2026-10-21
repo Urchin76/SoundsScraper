@@ -341,29 +341,43 @@ async def scrape_platomania(client):
     return unique
 
 # --- DATABASE VERWERKING ---
+# --- DATABASE VERWERKING & AUTOMATISCH OPSCHONEN ---
 def process_and_compare(scraped_items):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     new_items, price_changes = [], []
+    
+    # Verzamel alle URL's die zojuist zijn gemaand/gescraped
+    scraped_urls = {item["url"] for item in scraped_items}
+
+    # Haal alle bestaande items op uit de database
+    cursor.execute("SELECT url, price, title, source FROM catalog")
+    existing_items = {row[0]: {"price": row[1], "title": row[2], "source": row[3]} for row in cursor.fetchall()}
 
     for item in scraped_items:
-        cursor.execute("SELECT price, title, source FROM catalog WHERE url = ?", (item["url"],))
-        result = cursor.fetchone()
-
-        if result is None:
+        url = item["url"]
+        if url not in existing_items:
             new_items.append(item)
-            cursor.execute("INSERT INTO catalog (url, title, category, price, source) VALUES (?, ?, ?, ?, ?)",
-                           (item["url"], item["title"], item["category"], item["price"], item["source"]))
+            cursor.execute("INSERT OR REPLACE INTO catalog (url, title, category, price, source) VALUES (?, ?, ?, ?, ?)",
+                           (url, item["title"], item["category"], item["price"], item["source"]))
         else:
-            old_price, old_title, old_source = result[0], result[1], result[2]
-            if not old_source:
-                cursor.execute("UPDATE catalog SET source = ? WHERE url = ?", (item["source"], item["url"]))
+            old_data = existing_items[url]
+            old_price = old_data["price"]
+            
             if old_price != item["price"]:
                 price_changes.append({
                     "title": item["title"], "category": item["category"], "source": item["source"],
-                    "old_price": old_price, "new_price": item["price"], "url": item["url"]
+                    "old_price": old_price, "new_price": item["price"], "url": url
                 })
-                cursor.execute("UPDATE catalog SET price = ? WHERE url = ?", (item["price"], item["url"]))
+            # Update altijd voor de zekerheid de prijs en titel
+            cursor.execute("UPDATE catalog SET price = ?, title = ? WHERE url = ?", (item["price"], item["title"], url))
+
+    # 🧹 STAP 3: Verwijder items die niet meer op de webshops staan (uitverkocht / verdwenen)
+    existing_urls = set(existing_items.keys())
+    stale_urls = existing_urls - scraped_urls
+    if stale_urls:
+        cursor.executemany("DELETE FROM catalog WHERE url = ?", [(u,) for u in stale_urls])
+        print(f"🗑️ {len(stale_urls)} verlopen/uitverkochte items automatisch opgeschoond uit de database.")
 
     conn.commit()
     conn.close()

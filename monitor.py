@@ -126,7 +126,8 @@ async def scrape_sounds(client):
             if not res: break
 
             soup = BeautifulSoup(res.text, "html.parser")
-            items = soup.find_all("div", class_=re.compile("product|item|row|album", re.I)) or soup.find_all("tr")
+            # Sounds.nl gebruikt vaak product rijen of grid items
+            items = soup.find_all(["div", "tr"], class_=re.compile("product|item|row|album|col", re.I))
             if not items: break
 
             page_found = 0
@@ -138,15 +139,19 @@ async def scrape_sounds(client):
                 if price_match and link_tag:
                     price = float(price_match.group(1).replace(",", "."))
                     href = urljoin("https://www.sounds.nl", link_tag['href'])
-                    lines = [line.strip() for line in text.split("\n") if line.strip()]
-                    title = clean_title(lines[0]) if lines else ""
-                    if title and "uitverkoop" not in href and "detail" in href:
+                    
+                    # Zoek specifiek naar de titel in heading tags of de link zelf
+                    title_elem = item.find(["h2", "h3", "h4", "a"], class_=re.compile("title|name|album", re.I))
+                    title = clean_title(title_elem.get_text()) if title_elem else clean_title(link_tag.get_text())
+                    
+                    if title and len(title) > 3 and "uitverkoop" not in href:
                         found_items.append({"url": href, "title": title, "category": cat_name, "price": price, "source": "Sounds.nl"})
                         page_found += 1
             if page_found == 0: break
 
-    print(f"    ✅ Sounds.nl: {len(found_items)} items gevonden.")
-    return found_items
+    unique = list({v['url']: v for v in found_items}.values())
+    print(f"    ✅ Sounds.nl: {len(unique)} items gevonden.")
+    return unique
 
 async def scrape_kroese(client):
     print("🔍 Scrapen van Kroese-Online.nl...")
@@ -162,15 +167,13 @@ async def scrape_kroese(client):
             if not res: break
 
             soup = BeautifulSoup(res.text, "html.parser")
-            for tag in soup(["header", "nav", "footer"]):
-                tag.decompose()
-
             page_found = 0
-            containers = soup.find_all(["div", "li", "article"])
+            containers = soup.find_all(["div", "article", "li"], class_=re.compile("product|item|card", re.I))
+            if not containers:
+                containers = soup.find_all("div", class_=re.compile("row|grid", re.I))
+
             for container in containers:
                 text = container.get_text(separator=" ", strip=True)
-                if len(text) > 400 or len(text) < 10: continue
-
                 price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
                 if not price_match: continue
 
@@ -180,12 +183,11 @@ async def scrape_kroese(client):
                 href = link['href']
                 if any(x in href.lower() for x in ["winkelwagen", "cart", "account", "login", "#"]): continue
 
-                title = clean_title(link.get_text(strip=True))
-                if not title:
-                    img = link.find("img", alt=True)
-                    if img: title = clean_title(img["alt"])
+                # Probeer een duidelijke titel te vinden
+                title_elem = container.find(["h2", "h3", "h4", "a"], class_=re.compile("title|name|product", re.I))
+                title = clean_title(title_elem.get_text()) if title_elem else clean_title(link.get_text())
 
-                if title and len(title) > 3 and title.lower() not in ["in winkelwagen", "bestel", "bekijk", "details"]:
+                if title and len(title) > 3 and title.lower() not in ["in winkelwagen", "bestel", "bekijk", "details", "details weergeven"]:
                     price = float(price_match.group(1).replace(",", "."))
                     found_items.append({
                         "url": urljoin("https://www.kroese-online.nl", href),
@@ -198,58 +200,20 @@ async def scrape_kroese(client):
     unique = list({v['url']: v for v in found_items}.values())
     print(f"    ✅ Kroese Online: {len(unique)} items gevonden.")
     return unique
-
+    
 async def scrape_velvet(client):
     print("🔍 Scrapen van VelvetMusic.nl...")
-    base_urls = [
-        ("LP", "https://www.velvetmusic.nl/collections/aanbiedingen-lp"),
-        ("CD", "https://www.velvetmusic.nl/collections/aanbiedingen-cd")
-    ]
-    found_items = []
-    for cat_name, base_url in base_urls:
-        for page in range(1, 16):
-            url = f"{base_url}?page={page}"
-            res = await fetch(client, url)
-            if not res: break
+    return await scrape_shopify_store(client, "https://www.velvetmusic.nl", "Velvet Music")
 
-            soup = BeautifulSoup(res.text, "html.parser")
-            items = soup.find_all(["div", "article", "li"], class_=re.compile("product|card|grid-item", re.I))
-            if not items: break
-
-            page_found = 0
-            for item in items:
-                text = item.get_text()
-                price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-                
-                title_text = ""
-                title_tags = item.find_all(["a", "h2", "h3", "h4"], class_=re.compile("title|heading|card-title|name", re.I)) or item.find_all("a", href=True)
-                for tag in title_tags:
-                    candidate = clean_title(tag.get_text(strip=True))
-                    if candidate and "korting" not in candidate.lower():
-                        title_text = candidate
-                        break
-
-                if not title_text:
-                    img = item.find("img", alt=True)
-                    if img and img.get("alt"): title_text = clean_title(img["alt"])
-
-                link_tag = item.find("a", href=True)
-                if price_match and link_tag and title_text:
-                    price = float(price_match.group(1).replace(",", "."))
-                    href = urljoin("https://www.velvetmusic.nl", link_tag['href'])
-                    found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Velvet Music"})
-                    page_found += 1
-
-            if page_found == 0: break
-
-    print(f"    ✅ Velvet Music: {len(found_items)} items gevonden.")
-    return found_items
-
-async def scrape_concerto(client):
+aasync def scrape_concerto(client):
     print("🔍 Scrapen van Concerto.nl...")
+    return await scrape_shopify_store(client, "https://www.concerto.nl", "Concerto")
+
+# Hulpfunctie voor winkels die Shopify-achtige structuren gebruiken (zoals Velvet en Concerto)
+async def scrape_shopify_store(client, base_domain, source_name):
     base_urls = [
-        ("LP", "https://www.concerto.nl/collections/aanbiedingen-lp"),
-        ("CD", "https://www.concerto.nl/collections/aanbiedingen-cd")
+        ("LP", f"{base_domain}/collections/aanbiedingen-lp"),
+        ("CD", f"{base_domain}/collections/aanbiedingen-cd")
     ]
     found_items = []
     for cat_name, base_url in base_urls:
@@ -259,6 +223,7 @@ async def scrape_concerto(client):
             if not res: break
 
             soup = BeautifulSoup(res.text, "html.parser")
+            # Zoek naar standaard productkaarten
             items = soup.find_all(["div", "article", "li"], class_=re.compile("product|card|grid-item", re.I))
             if not items: break
 
@@ -266,30 +231,37 @@ async def scrape_concerto(client):
             for item in items:
                 text = item.get_text()
                 price_match = re.search(r'€\s*(\d+[\.,]\d{2})', text)
-                
+                if not price_match: continue
+
                 title_text = ""
-                title_tags = item.find_all(["a", "h2", "h3", "h4"], class_=re.compile("title|heading|card-title|name", re.I)) or item.find_all("a", href=True)
+                # Zoek naar typische titel-elementen binnen de kaart
+                title_tags = item.find_all(["a", "h2", "h3", "h4"], class_=re.compile("title|heading|card-title|name|product-item", re.I))
+                
                 for tag in title_tags:
                     candidate = clean_title(tag.get_text(strip=True))
-                    if candidate and "korting" not in candidate.lower():
+                    # Filter rommelteksten eruit
+                    if candidate and not any(bad in candidate.lower() for bad in ["korting", "details weergeven", "in winkelwagen", "bestel"]):
                         title_text = candidate
                         break
 
+                # Fallback op afbeelding alt-tekst als de titel niet via tekst te vinden is
                 if not title_text:
                     img = item.find("img", alt=True)
-                    if img and img.get("alt"): title_text = clean_title(img["alt"])
+                    if img and img.get("alt"): 
+                        title_text = clean_title(img["alt"])
 
                 link_tag = item.find("a", href=True)
                 if price_match and link_tag and title_text:
                     price = float(price_match.group(1).replace(",", "."))
-                    href = urljoin("https://www.concerto.nl", link_tag['href'])
-                    found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": "Concerto"})
+                    href = urljoin(base_domain, link_tag['href'])
+                    found_items.append({"url": href, "title": title_text, "category": cat_name, "price": price, "source": source_name})
                     page_found += 1
 
             if page_found == 0: break
 
-    print(f"    ✅ Concerto: {len(found_items)} items gevonden.")
-    return found_items
+    unique = list({v['url']: v for v in found_items}.values())
+    print(f"    ✅ {source_name}: {len(unique)} items gevonden.")
+    return unique
 
 async def scrape_platomania(client):
     print("🔍 Scrapen van Platomania.nl...")

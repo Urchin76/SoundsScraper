@@ -205,7 +205,7 @@ async def scrape_velvet(client):
     print("🔍 Scrapen van VelvetMusic.nl...")
     return await scrape_shopify_store(client, "https://www.velvetmusic.nl", "Velvet Music")
 
-aasync def scrape_concerto(client):
+async def scrape_concerto(client):
     print("🔍 Scrapen van Concerto.nl...")
     return await scrape_shopify_store(client, "https://www.concerto.nl", "Concerto")
 
